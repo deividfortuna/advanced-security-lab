@@ -1,0 +1,33 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 3 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  dockerfile-base-image:
+    name: Dockerfile base image policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Scan Dockerfiles
+        run: node .github/scripts/scan-dockerfiles.js . dockerfile-base-image.sarif
+
+      - name: Upload SARIF to Code Scanning
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: dockerfile-base-image.sarif
+          category: dockerfile-base-image
