@@ -1,0 +1,12 @@
+metadata:
+  name: "Ensure Docker base images come from Chainguard"
+  id: "CKV_CHAINGUARD_1"
+  category: "SUPPLY_CHAIN"
+  severity: "MEDIUM"
+definition:
+  cond_type: "attribute"
+  resource_types:
+    - "FROM"
+  attribute: "value"
+  operator: "regex_match"
+  value: "^(--platform=[^ ]+\\s+)?(cgr\\.dev/chainguard/|chainguard/).+"
