@@ -1,8 +1,8 @@
 metadata:
   name: "Ensure Docker base images come from Chainguard"
-  id: "CKV2_DOCKERFILE_1"
+  id: "CKV_CHAINGUARD_1"
   category: "SUPPLY_CHAIN"
-  severity: "HIGH"
+  severity: "MEDIUM"
 definition:
   cond_type: "attribute"
   resource_types:
