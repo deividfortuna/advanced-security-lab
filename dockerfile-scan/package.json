@@ -1,0 +1,20 @@
+{
+  "name": "dockerfile-scan",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "build": "ncc build index.js -o dist -m",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "dockerfile-ast": "^0.7.1",
+    "node-sarif-builder": "^4.1.0"
+  },
+  "devDependencies": {
+    "@vercel/ncc": "^0.38.4"
+  }
+}
