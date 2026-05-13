@@ -20,7 +20,6 @@ jobs:
         id: scan
         uses: deividfortuna/advanced-security-lab/dockerfile-scan@gh-action
         with:
-          directory: .
           output: results.sarif
           fail-on-findings: "false"
 

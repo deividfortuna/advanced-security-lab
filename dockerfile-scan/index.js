@@ -1,69 +1,43 @@
 #!/usr/bin/env node
-"use strict";
 
-const fs = require("fs");
-const path = require("path");
-const { DockerfileParser } = require("dockerfile-ast");
-const {
+import fs from "node:fs";
+import path from "node:path";
+import * as core from "@actions/core";
+import { DockerfileParser } from "dockerfile-ast";
+import {
   SarifBuilder,
   SarifRunBuilder,
   SarifRuleBuilder,
   SarifResultBuilder,
-} = require("node-sarif-builder");
+} from "node-sarif-builder";
+import pkg from "./package.json" with { type: "json" };
+import chainguardSuggestions from "./chainguard-suggestions.json" with { type: "json" };
 
 const RULE_ID = "TEST_CHAINGUARD_1";
 const RULE_NAME = "Ensure Docker base images come from Chainguard";
 const CHAINGUARD_REGEX = /^(--platform=[^ ]+\s+)?(cgr\.dev\/chainguard\/|chainguard\/).+/;
 
 const TOOL_NAME = "dockerfile-scan";
-const TOOL_VERSION = require("./package.json").version;
+const TOOL_VERSION = pkg.version;
 
-function parseArgs(argv) {
-  const args = {
-    directory: process.env.INPUT_DIRECTORY || ".",
-    output: process.env.INPUT_OUTPUT || "results.sarif",
-    failOnFindings:
-      (process.env.INPUT_FAIL_ON_FINDINGS || "false").toLowerCase() === "true",
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "-d" || a === "--directory") {
-      args.directory = argv[++i];
-    } else if (a === "-o" || a === "--output") {
-      args.output = argv[++i];
-    } else if (a === "--fail-on-findings") {
-      args.failOnFindings = true;
-    } else if (a === "-h" || a === "--help") {
-      args.help = true;
-    } else {
-      args.directory = a;
-    }
+function suggestChainguardImage(image) {
+  if (!image) return null;
+  const repo = image.split(/[:@]/)[0];
+  const direct = chainguardSuggestions[repo];
+  if (direct) return direct;
+  if (
+    repo === "gcr.io/distroless/static" ||
+    /^gcr\.io\/distroless\/static-debian\d+$/.test(repo)
+  ) {
+    return "cgr.dev/chainguard/static:latest";
   }
-  return args;
-}
-
-function appendFile(envVar, text) {
-  const target = process.env[envVar];
-  if (!target) return;
-  try {
-    fs.appendFileSync(target, text);
-  } catch {}
-}
-
-function emitWorkflowAnnotation(fileUri, v) {
-  if (!process.env.GITHUB_ACTIONS) return;
-  const msg = `${RULE_ID}: base image "${v.value}" is not from Chainguard (cgr.dev/chainguard/ or chainguard/).`;
-  process.stdout.write(
-    `::warning file=${fileUri},line=${v.startLine},col=${v.startColumn},endLine=${v.endLine},endColumn=${v.endColumn},title=${RULE_ID}::${msg}\n`,
-  );
-}
-
-function isDockerfile(name) {
-  return (
-    name === "Dockerfile" ||
-    name.endsWith(".Dockerfile") ||
-    name.startsWith("Dockerfile.")
-  );
+  if (repo.startsWith("gcr.io/distroless/base")) {
+    return "cgr.dev/chainguard/glibc-dynamic:latest";
+  }
+  if (repo.startsWith("gcr.io/distroless/cc")) {
+    return "cgr.dev/chainguard/cc-dynamic:latest";
+  }
+  return null;
 }
 
 const SKIP_DIRS = new Set([
@@ -75,6 +49,14 @@ const SKIP_DIRS = new Set([
   "build",
   ".cache",
 ]);
+
+function isDockerfile(name) {
+  return (
+    name === "Dockerfile" ||
+    name.endsWith(".Dockerfile") ||
+    name.startsWith("Dockerfile.")
+  );
+}
 
 function findDockerfiles(root) {
   const out = [];
@@ -110,13 +92,26 @@ function scanFile(filePath) {
     const normalized = value.replace(/\s+/g, " ").trim();
     if (CHAINGUARD_REGEX.test(normalized)) continue;
 
-    const range = from.getImageRange() || from.getRange();
+    const imageRange = from.getImageRange();
+    const range = imageRange || from.getRange();
+    const image = from.getImage();
+    const suggestion = suggestChainguardImage(image);
     violations.push({
       value: normalized,
+      image,
+      suggestion,
       startLine: range.start.line + 1,
       startColumn: range.start.character + 1,
       endLine: range.end.line + 1,
       endColumn: range.end.character + 1,
+      imageRange: imageRange
+        ? {
+            startLine: imageRange.start.line + 1,
+            startColumn: imageRange.start.character + 1,
+            endLine: imageRange.end.line + 1,
+            endColumn: imageRange.end.character + 1,
+          }
+        : null,
     });
   }
 
@@ -124,21 +119,15 @@ function scanFile(filePath) {
 }
 
 function toFileUri(filePath, root) {
-  const rel = path.relative(root, filePath);
-  return rel.split(path.sep).join("/");
+  return path.relative(root, filePath).split(path.sep).join("/");
 }
 
-function main() {
-  const args = parseArgs(process.argv.slice(2));
-  if (args.help) {
-    process.stdout.write(
-      `Usage: dockerfile-scan [-d <dir>] [-o <output.sarif>]\n` +
-        `  Scans Dockerfiles for ${RULE_ID}: base images must come from Chainguard.\n`,
-    );
-    return 0;
-  }
+async function run() {
+  const directory = core.getInput("working-directory") || ".";
+  const output = core.getInput("output") || "results.sarif";
+  const failOnFindings = core.getBooleanInput("fail-on-findings");
 
-  const root = path.resolve(args.directory);
+  const root = path.resolve(directory);
   const files = findDockerfiles(root);
 
   const sarifBuilder = new SarifBuilder();
@@ -146,13 +135,13 @@ function main() {
     toolDriverName: TOOL_NAME,
     toolDriverVersion: TOOL_VERSION,
   });
-
   runBuilder.addRule(
     new SarifRuleBuilder().initSimple({
       ruleId: RULE_ID,
       shortDescriptionText: RULE_NAME,
       fullDescriptionText:
         "FROM instructions must reference images published under cgr.dev/chainguard/ or chainguard/.",
+      helpUri: "https://chainguard.dev/docs",
     }),
   );
 
@@ -162,57 +151,91 @@ function main() {
     try {
       violations = scanFile(file);
     } catch (err) {
-      process.stderr.write(`Failed to parse ${file}: ${err.message}\n`);
+      core.warning(`Failed to parse ${file}: ${err.message}`);
       continue;
     }
     const fileUri = toFileUri(file, root);
     for (const v of violations) {
       totalViolations++;
-      runBuilder.addResult(
-        new SarifResultBuilder().initSimple({
-          level: "warning",
-          ruleId: RULE_ID,
-          messageText: `Base image "${v.value}" is not from Chainguard (cgr.dev/chainguard/ or chainguard/).`,
-          fileUri,
-          startLine: v.startLine,
-          startColumn: v.startColumn,
-          endLine: v.endLine,
-          endColumn: v.endColumn,
-        }),
-      );
-      process.stdout.write(
-        `${fileUri}:${v.startLine}:${v.startColumn} ${RULE_ID} ${v.value}\n`,
-      );
-      emitWorkflowAnnotation(fileUri, v);
+      const suggestionSuffix = v.suggestion
+        ? ` Suggested replacement: ${v.suggestion}.`
+        : "";
+      const messageText = `Base image "${v.value}" is not from Chainguard (cgr.dev/chainguard/ or chainguard/).${suggestionSuffix}`;
+
+      const resultBuilder = new SarifResultBuilder().initSimple({
+        level: "warning",
+        ruleId: RULE_ID,
+        messageText,
+        fileUri,
+        startLine: v.startLine,
+        startColumn: v.startColumn,
+        endLine: v.endLine,
+        endColumn: v.endColumn,
+      });
+
+      if (v.suggestion && v.imageRange) {
+        resultBuilder.result.fixes = [
+          {
+            description: {
+              text: `Replace base image with the Chainguard equivalent: ${v.suggestion}.`,
+            },
+            artifactChanges: [
+              {
+                artifactLocation: { uri: fileUri },
+                replacements: [
+                  {
+                    deletedRegion: {
+                      startLine: v.imageRange.startLine,
+                      startColumn: v.imageRange.startColumn,
+                      endLine: v.imageRange.endLine,
+                      endColumn: v.imageRange.endColumn,
+                    },
+                    insertedContent: { text: v.suggestion },
+                  },
+                ],
+              },
+            ],
+          },
+        ];
+      }
+
+      runBuilder.addResult(resultBuilder);
+      core.warning(`${RULE_ID}: ${messageText}`, {
+        title: RULE_ID,
+        file: fileUri,
+        startLine: v.startLine,
+        startColumn: v.startColumn,
+        endLine: v.endLine,
+        endColumn: v.endColumn,
+      });
     }
   }
 
   sarifBuilder.addRun(runBuilder);
-  const outPath = path.resolve(args.output);
+  const outPath = path.resolve(output);
   sarifBuilder.generateSarifFileSync(outPath);
 
-  process.stdout.write(
-    `Scanned ${files.length} Dockerfile(s); ${totalViolations} violation(s). SARIF written to ${outPath}\n`,
+  core.info(
+    `Scanned ${files.length} Dockerfile(s); ${totalViolations} violation(s). SARIF written to ${outPath}`,
   );
+  core.setOutput("sarif-file", outPath);
+  core.setOutput("violations", totalViolations);
+  core.setOutput("files-scanned", files.length);
 
-  appendFile(
-    "GITHUB_OUTPUT",
-    `sarif-file=${outPath}\nviolations=${totalViolations}\nfiles-scanned=${files.length}\n`,
-  );
-  appendFile(
-    "GITHUB_STEP_SUMMARY",
-    `## ${RULE_ID} — ${RULE_NAME}\n\n` +
-      `- Files scanned: **${files.length}**\n` +
-      `- Violations: **${totalViolations}**\n` +
-      `- SARIF: \`${path.relative(root, outPath) || outPath}\`\n`,
-  );
+  await core.summary
+    .addHeading(`${RULE_ID} — ${RULE_NAME}`, 2)
+    .addList([
+      `Files scanned: ${files.length}`,
+      `Violations: ${totalViolations}`,
+      `SARIF: ${path.relative(root, outPath) || outPath}`,
+    ])
+    .write();
 
-  if (args.failOnFindings && totalViolations > 0) return 1;
-  return 0;
+  if (failOnFindings && totalViolations > 0) {
+    core.setFailed(
+      `${totalViolations} ${RULE_ID} violation(s) found across ${files.length} Dockerfile(s).`,
+    );
+  }
 }
 
-if (require.main === module) {
-  process.exit(main());
-}
-
-module.exports = { scanFile, findDockerfiles, CHAINGUARD_REGEX };
+run().catch((err) => core.setFailed(err.stack || err.message));

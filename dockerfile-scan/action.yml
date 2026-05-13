@@ -7,7 +7,7 @@ branding:
   color: green
 
 inputs:
-  directory:
+  working-directory:
     description: Directory to scan for Dockerfiles.
     required: false
     default: "."
