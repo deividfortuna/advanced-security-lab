@@ -1,0 +1,33 @@
+name: Dockerfile Chainguard Scan
+description: Scan Dockerfiles to enforce that FROM base images come from Chainguard (TEST_CHAINGUARD_1). Emits SARIF.
+author: deividfortuna
+
+branding:
+  icon: shield
+  color: green
+
+inputs:
+  working-directory:
+    description: Directory to scan for Dockerfiles.
+    required: false
+    default: "."
+  output:
+    description: Path to write the SARIF report.
+    required: false
+    default: results.sarif
+  fail-on-findings:
+    description: If "true", the action exits non-zero when any violation is found.
+    required: false
+    default: "false"
+
+outputs:
+  sarif-file:
+    description: Absolute path of the generated SARIF file.
+  violations:
+    description: Total number of violations found.
+  files-scanned:
+    description: Total number of Dockerfiles scanned.
+
+runs:
+  using: node20
+  main: dist/index.js

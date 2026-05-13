@@ -1,6 +1,6 @@
 # Non-compliant: uses public registry images (should raise warnings).
 
-FROM node:20 AS builder
+FROM node:21 AS builder
 WORKDIR /app
 COPY . .
 RUN npm run build

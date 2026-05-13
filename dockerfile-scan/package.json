@@ -1,0 +1,21 @@
+{
+  "name": "dockerfile-scan",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "build": "esbuild index.js --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js --minify --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\"",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@actions/core": "^3.0.1",
+    "dockerfile-ast": "^0.7.1",
+    "node-sarif-builder": "^4.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0"
+  }
+}
